@@ -6,12 +6,11 @@ def create_food_prompt():
 {
   "foods": [
     {
-      "name": "食物英文名称",
-      "chinese_name": "食物中文名称",
+      "en_name": "食物英文名称",
+      "ch_name": "食物中文名称",
       "estimated_weight_grams": 估算重量（数字）,
-      "confidence": 0.8,
-      "notes": "任何补充说明",
-      "cooking_method": "raw/cooked/fried/steamed等"
+      "confidence": 置信度(0-1),
+      "method": "raw/cooked/fried/steamed等"
     }
   ],
 }
@@ -21,6 +20,6 @@ def create_food_prompt():
 2. 重量估算要合理（参考标准餐具大小）
 3. 食物名称使用USDA数据库中常见的英文名称
 4. 如果不确定具体重量，给出合理范围的中值
-5. confidence表示识别的置信度（0-1）
+5. 不要给出过于相似的食物
 """
     return prompt
