@@ -5,6 +5,7 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 import os
 from prompt import create_food_prompt
+import time
 
 
 class InternVL3_model:
@@ -197,11 +198,11 @@ def analyze_food_image(image_path, model, tokenizer, max_tiles=4, device="cpu"):
 
 
 def main():
-
+    start_time = time.time()
     # 分析图像
-    image_path = r"foods\20240905_000550644_iOS.jpg"
-
-    model, tokenizer = InternVL3_model().model, InternVL3_model().tokenizer
+    image_path = r"foods/20240911_231850124_iOS.jpg"
+    intern_model = InternVL3_model()
+    model, tokenizer = intern_model.model, intern_model.tokenizer
 
     # 根据你的显存情况调整max_tiles
     # 4GB显存: max_tiles=1
@@ -213,7 +214,8 @@ def main():
     result = analyze_food_image(
         image_path, model, tokenizer, max_tiles=max_tiles, device=model.device
     )
-
+    end_time = time.time()
+    print(f"分析完成，耗时: {end_time - start_time:.2f} 秒")
     print("\n" + "=" * 50)
     print("食物分析结果:")
     print("=" * 50)
