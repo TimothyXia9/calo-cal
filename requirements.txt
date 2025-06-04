@@ -1,0 +1,7 @@
+torch
+torchvision 
+torchaudio
+transformers==4.44.2
+sentencepiece
+protobuf
+requests
