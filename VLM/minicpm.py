@@ -47,11 +47,19 @@ class FoodRecognitionVLM:
         初始化MiniCPM-V-2.6模型用于食物识别
         针对Mac优化，不使用bitsandbytes
         """
-        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            # 使用MPS设备（Mac专用）
+            self.device = "mps"
+        else:
+            self.device = "cpu"
+
         print(f"Using device: {self.device}")
         patch_resampler_module()
         # 设置环境变量优化内存
-        os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+        if self.device == "mps":
+            os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
         with patch("transformers.dynamic_module_utils.get_imports", fixed_get_imports):
             try:
                 print("Loading model with Mac-optimized settings...")
@@ -61,6 +69,7 @@ class FoodRecognitionVLM:
                     "trust_remote_code": True,
                     "torch_dtype": torch.float16,
                     "low_cpu_mem_usage": True,
+                    "use_fast": False,
                 }
 
                 # 如果启用CPU卸载，使用device_map
@@ -131,40 +140,36 @@ class FoodRecognitionVLM:
             torch.mps.empty_cache()
 
         # 加载图片时限制尺寸
+
         image = Image.open(image_path).convert("RGB")
-        # 如果图片太大，先压缩
-        max_size = (768, 768)  # 限制最大尺寸
+        max_size = (448, 448)
         if image.size[0] > max_size[0] or image.size[1] > max_size[1]:
             image.thumbnail(max_size, Image.Resampling.LANCZOS)
 
-        # 默认输出格式
+        # 修改提示词，确保是中文
         if custom_format is None:
             format_instruction = create_prompt()
         else:
             format_instruction = f"请识别图片中的食物并按照以下格式输出：\n{json.dumps(custom_format, ensure_ascii=False, indent=2)}"
 
-        # 构建消息
+        # 修改消息格式 - 这是关键修改
         msgs = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image", "image": image},
-                    {"type": "text", "text": format_instruction},
-                ],
-            }
+            {"role": "user", "content": format_instruction}  # 只传递文本，图像单独传递
         ]
 
         try:
-            # 生成回复
             with torch.no_grad():
+                # 修改调用方式
                 response = self.model.chat(
-                    image=image,
-                    msgs=msgs,
+                    image=image,  # 图像单独传递
+                    msgs=msgs,  # 文本消息
                     tokenizer=self.tokenizer,
-                    sampling=False,  # 使用确定性输出
+                    sampling=False,
                     temperature=0.1,
                     max_new_tokens=1024,
                 )
+
+            print(f"Raw response: {response}")  # 调试输出
 
             # 尝试解析JSON
             try:
@@ -226,11 +231,11 @@ class FoodRecognitionVLM:
 # 使用示例
 def main():
     # 初始化模型
-    vlm = FoodRecognitionVLM()
+    vlm = FoodRecognitionVLM(use_cpu_offload=False)
 
     print(vlm.get_memory_usage())
 
-    image_path = r"/Users/tianqi/CODE/calo-calc2/foods/20240903_163132850_iOS.jpg"
+    image_path = r"D:\CODE\cal-calc2\foods\20240905_000550644_iOS.jpg"
 
     time_start = time()
     print(f"Starting food recognition for {image_path}...")
@@ -243,6 +248,4 @@ def main():
 
 
 if __name__ == "__main__":
-    print(time().)
     main()
-    print(time())

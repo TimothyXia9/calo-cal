@@ -1,4 +1,4 @@
-def create_prompt():
+def create_food_prompt():
     """创建食物分析的结构化提示词"""
     prompt = """
 请分析这张图片中的食物，并以JSON格式输出结果。严格按照以下格式：

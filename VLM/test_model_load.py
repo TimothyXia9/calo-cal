@@ -46,11 +46,18 @@ class FoodRecognitionVLM:
         初始化MiniCPM-V-2.6模型用于食物识别
         解决 Mac 上的多个导入问题
         """
-        self.device = "mps" if torch.backends.mps.is_available() else "cpu"
+        if torch.cuda.is_available():
+            self.device = "cuda"
+        elif torch.backends.mps.is_available():
+            # 使用MPS设备（Mac专用）
+            self.device = "mps"
+        else:
+            self.device = "cpu"
+
         print(f"Using device: {self.device}")
 
         # 设置环境变量优化内存
-        os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+        # os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
 
         print("Loading model with Mac-optimized settings...")
 
@@ -107,4 +114,5 @@ class FoodRecognitionVLM:
 
 
 if __name__ == "__main__":
+    print(torch.cuda.is_available())
     vlm = FoodRecognitionVLM()
