@@ -1,5 +1,3 @@
-import math
-import numpy as np
 import torch
 import torchvision.transforms as T
 from PIL import Image
@@ -7,6 +5,65 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 import os
 from prompt import create_food_prompt
+
+
+class InternVL3_model:
+    def __init__(self, model_path="OpenGVLab/InternVL3-2B"):
+        self.model_path = model_path
+        if torch.backends.mps.is_available():
+            self.device = "mps"
+            os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+        elif torch.cuda.is_available():
+            self.device = "cuda"
+        else:
+            self.device = "cpu"
+        print(f"Using device: {self.device}")
+
+        self.device_map = "auto"
+
+        self.model, self.tokenizer = self.load_model()
+
+    def load_model(self):
+        try:
+            model = AutoModel.from_pretrained(
+                self.model_path,
+                torch_dtype=torch.bfloat16,
+                load_in_8bit=True,  # 8bit量化以节省显存
+                low_cpu_mem_usage=True,
+                use_flash_attn=False,
+                trust_remote_code=True,
+                device_map=self.device_map,
+            ).eval()
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.model_path, trust_remote_code=True, use_fast=False
+            )
+            print("模型加载成功！")
+
+        except Exception as e:
+            print(f"模型加载失败: {e}")
+            print("尝试不使用量化...")
+            try:
+                model = (
+                    AutoModel.from_pretrained(
+                        self.model_path,
+                        torch_dtype=torch.bfloat16,
+                        low_cpu_mem_usage=True,
+                        use_flash_attn=False,
+                        trust_remote_code=True,
+                    )
+                    .eval()
+                    .to(self.device)
+                )
+
+                tokenizer = AutoTokenizer.from_pretrained(
+                    self.model_path, trust_remote_code=True, use_fast=False
+                )
+                print("模型加载成功（无量化）！")
+            except Exception as e2:
+                print(f"模型加载完全失败: {e2}")
+                return
+            return model, tokenizer
 
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -103,7 +160,7 @@ def load_image(image_file, input_size=448, max_num=4):
     return pixel_values
 
 
-def analyze_food_image(image_path, model, tokenizer, max_tiles=4):
+def analyze_food_image(image_path, model, tokenizer, max_tiles=4, device="cpu"):
     """
     分析食物图片的主函数
     """
@@ -115,7 +172,7 @@ def analyze_food_image(image_path, model, tokenizer, max_tiles=4):
         # 加载图像，限制最大块数以节省内存
         print(f"正在加载图像: {image_path}")
         pixel_values = (
-            load_image(image_path, max_num=max_tiles).to(torch.bfloat16).cuda()
+            load_image(image_path, max_num=max_tiles).to(torch.bfloat16).to(device)
         )
         print(f"图像已处理为 {pixel_values.shape[0]} 个块")
 
@@ -140,87 +197,11 @@ def analyze_food_image(image_path, model, tokenizer, max_tiles=4):
 
 
 def main():
-    # 模型配置
-    model_path = "OpenGVLab/InternVL3-2B"  # 你可以改为其他版本
-
-    print("正在加载模型...")
-
-    # 检查是否有多GPU，如果只有一个GPU就简化配置
-    if torch.cuda.device_count() > 1:
-        # 多GPU配置（原始的split_model逻辑）
-        print(f"检测到 {torch.cuda.device_count()} 个GPU，使用多GPU配置")
-        try:
-            config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-            num_layers = config.llm_config.num_hidden_layers
-            device_map = {}
-            world_size = torch.cuda.device_count()
-            num_layers_per_gpu = math.ceil(num_layers / (world_size - 0.5))
-            num_layers_per_gpu = [num_layers_per_gpu] * world_size
-            num_layers_per_gpu[0] = math.ceil(num_layers_per_gpu[0] * 0.5)
-            layer_cnt = 0
-            for i, num_layer in enumerate(num_layers_per_gpu):
-                for j in range(num_layer):
-                    device_map[f"language_model.model.layers.{layer_cnt}"] = i
-                    layer_cnt += 1
-            device_map["vision_model"] = 0
-            device_map["mlp1"] = 0
-            device_map["language_model.model.tok_embeddings"] = 0
-            device_map["language_model.model.embed_tokens"] = 0
-            device_map["language_model.output"] = 0
-            device_map["language_model.model.norm"] = 0
-            device_map["language_model.model.rotary_emb"] = 0
-            device_map["language_model.lm_head"] = 0
-            device_map[f"language_model.model.layers.{num_layers - 1}"] = 0
-        except:
-            print("多GPU配置失败，使用单GPU配置")
-            device_map = "auto"
-    else:
-        print("使用单GPU配置")
-        device_map = "auto"
-
-    # 加载模型
-    try:
-        model = AutoModel.from_pretrained(
-            model_path,
-            torch_dtype=torch.bfloat16,
-            load_in_8bit=True,  # 8bit量化以节省显存
-            low_cpu_mem_usage=True,
-            use_flash_attn=False,  # 关闭flash_attn以避免兼容性问题
-            trust_remote_code=True,
-            device_map=device_map,
-        ).eval()
-
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_path, trust_remote_code=True, use_fast=False
-        )
-        print("模型加载成功！")
-
-    except Exception as e:
-        print(f"模型加载失败: {e}")
-        print("尝试不使用量化...")
-        try:
-            model = (
-                AutoModel.from_pretrained(
-                    model_path,
-                    torch_dtype=torch.bfloat16,
-                    low_cpu_mem_usage=True,
-                    use_flash_attn=False,
-                    trust_remote_code=True,
-                )
-                .eval()
-                .cuda()
-            )
-
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_path, trust_remote_code=True, use_fast=False
-            )
-            print("模型加载成功（无量化）！")
-        except Exception as e2:
-            print(f"模型加载完全失败: {e2}")
-            return
 
     # 分析图像
     image_path = r"foods\20240905_000550644_iOS.jpg"
+
+    model, tokenizer = InternVL3_model().model, InternVL3_model().tokenizer
 
     # 根据你的显存情况调整max_tiles
     # 4GB显存: max_tiles=1
@@ -229,7 +210,9 @@ def main():
     max_tiles = 4  # 你可以根据显存情况调整
 
     print(f"\n开始分析图像，最大块数限制: {max_tiles}")
-    result = analyze_food_image(image_path, model, tokenizer, max_tiles=max_tiles)
+    result = analyze_food_image(
+        image_path, model, tokenizer, max_tiles=max_tiles, device=model.device
+    )
 
     print("\n" + "=" * 50)
     print("食物分析结果:")
