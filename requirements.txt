@@ -1,7 +1,9 @@
 torch
 torchvision 
 torchaudio
-transformers==4.44.2
+transformers>=4.37.2
 sentencepiece
 protobuf
 requests
+accelerate
+einops
