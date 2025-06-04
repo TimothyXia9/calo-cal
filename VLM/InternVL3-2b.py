@@ -1,0 +1,242 @@
+import math
+import numpy as np
+import torch
+import torchvision.transforms as T
+from PIL import Image
+from torchvision.transforms.functional import InterpolationMode
+from transformers import AutoModel, AutoTokenizer, AutoConfig
+import os
+from prompt import create_food_prompt
+
+
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def build_transform(input_size):
+    MEAN, STD = IMAGENET_MEAN, IMAGENET_STD
+    transform = T.Compose(
+        [
+            T.Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+            T.Resize((input_size, input_size), interpolation=InterpolationMode.BICUBIC),
+            T.ToTensor(),
+            T.Normalize(mean=MEAN, std=STD),
+        ]
+    )
+    return transform
+
+
+def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_size):
+    best_ratio_diff = float("inf")
+    best_ratio = (1, 1)
+    area = width * height
+    for ratio in target_ratios:
+        target_aspect_ratio = ratio[0] / ratio[1]
+        ratio_diff = abs(aspect_ratio - target_aspect_ratio)
+        if ratio_diff < best_ratio_diff:
+            best_ratio_diff = ratio_diff
+            best_ratio = ratio
+        elif ratio_diff == best_ratio_diff:
+            if area > 0.5 * image_size * image_size * ratio[0] * ratio[1]:
+                best_ratio = ratio
+    return best_ratio
+
+
+def dynamic_preprocess(
+    image, min_num=1, max_num=12, image_size=448, use_thumbnail=False
+):
+    orig_width, orig_height = image.size
+    aspect_ratio = orig_width / orig_height
+
+    # calculate the existing image aspect ratio
+    target_ratios = set(
+        (i, j)
+        for n in range(min_num, max_num + 1)
+        for i in range(1, n + 1)
+        for j in range(1, n + 1)
+        if i * j <= max_num and i * j >= min_num
+    )
+    target_ratios = sorted(target_ratios, key=lambda x: x[0] * x[1])
+
+    # find the closest aspect ratio to the target
+    target_aspect_ratio = find_closest_aspect_ratio(
+        aspect_ratio, target_ratios, orig_width, orig_height, image_size
+    )
+
+    # calculate the target width and height
+    target_width = image_size * target_aspect_ratio[0]
+    target_height = image_size * target_aspect_ratio[1]
+    blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
+
+    # resize the image
+    resized_img = image.resize((target_width, target_height))
+    processed_images = []
+    for i in range(blocks):
+        box = (
+            (i % (target_width // image_size)) * image_size,
+            (i // (target_width // image_size)) * image_size,
+            ((i % (target_width // image_size)) + 1) * image_size,
+            ((i // (target_width // image_size)) + 1) * image_size,
+        )
+        # split the image
+        split_img = resized_img.crop(box)
+        processed_images.append(split_img)
+    assert len(processed_images) == blocks
+    if use_thumbnail and len(processed_images) != 1:
+        thumbnail_img = image.resize((image_size, image_size))
+        processed_images.append(thumbnail_img)
+    return processed_images
+
+
+def load_image(image_file, input_size=448, max_num=4):
+    """
+    加载和预处理图像
+    max_num: 最大块数，用于控制内存使用
+    """
+    image = Image.open(image_file).convert("RGB")
+    transform = build_transform(input_size=input_size)
+    images = dynamic_preprocess(
+        image, image_size=input_size, use_thumbnail=True, max_num=max_num
+    )
+    pixel_values = [transform(image) for image in images]
+    pixel_values = torch.stack(pixel_values)
+    return pixel_values
+
+
+def analyze_food_image(image_path, model, tokenizer, max_tiles=4):
+    """
+    分析食物图片的主函数
+    """
+    # 检查文件是否存在
+    if not os.path.exists(image_path):
+        return f"错误：图片文件不存在 - {image_path}"
+
+    try:
+        # 加载图像，限制最大块数以节省内存
+        print(f"正在加载图像: {image_path}")
+        pixel_values = (
+            load_image(image_path, max_num=max_tiles).to(torch.bfloat16).cuda()
+        )
+        print(f"图像已处理为 {pixel_values.shape[0]} 个块")
+
+        # 生成配置
+        generation_config = dict(
+            max_new_tokens=512,
+            do_sample=False,  # 使用贪婪解码获得更一致的结果
+            temperature=0.7,
+        )
+
+        # 构建问题
+        question = "<image>\n" + create_food_prompt()
+
+        # 进行推理
+        print("正在分析图像...")
+        response = model.chat(tokenizer, pixel_values, question, generation_config)
+
+        return response
+
+    except Exception as e:
+        return f"分析过程中出现错误: {str(e)}"
+
+
+def main():
+    # 模型配置
+    model_path = "OpenGVLab/InternVL3-2B"  # 你可以改为其他版本
+
+    print("正在加载模型...")
+
+    # 检查是否有多GPU，如果只有一个GPU就简化配置
+    if torch.cuda.device_count() > 1:
+        # 多GPU配置（原始的split_model逻辑）
+        print(f"检测到 {torch.cuda.device_count()} 个GPU，使用多GPU配置")
+        try:
+            config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+            num_layers = config.llm_config.num_hidden_layers
+            device_map = {}
+            world_size = torch.cuda.device_count()
+            num_layers_per_gpu = math.ceil(num_layers / (world_size - 0.5))
+            num_layers_per_gpu = [num_layers_per_gpu] * world_size
+            num_layers_per_gpu[0] = math.ceil(num_layers_per_gpu[0] * 0.5)
+            layer_cnt = 0
+            for i, num_layer in enumerate(num_layers_per_gpu):
+                for j in range(num_layer):
+                    device_map[f"language_model.model.layers.{layer_cnt}"] = i
+                    layer_cnt += 1
+            device_map["vision_model"] = 0
+            device_map["mlp1"] = 0
+            device_map["language_model.model.tok_embeddings"] = 0
+            device_map["language_model.model.embed_tokens"] = 0
+            device_map["language_model.output"] = 0
+            device_map["language_model.model.norm"] = 0
+            device_map["language_model.model.rotary_emb"] = 0
+            device_map["language_model.lm_head"] = 0
+            device_map[f"language_model.model.layers.{num_layers - 1}"] = 0
+        except:
+            print("多GPU配置失败，使用单GPU配置")
+            device_map = "auto"
+    else:
+        print("使用单GPU配置")
+        device_map = "auto"
+
+    # 加载模型
+    try:
+        model = AutoModel.from_pretrained(
+            model_path,
+            torch_dtype=torch.bfloat16,
+            load_in_8bit=True,  # 8bit量化以节省显存
+            low_cpu_mem_usage=True,
+            use_flash_attn=False,  # 关闭flash_attn以避免兼容性问题
+            trust_remote_code=True,
+            device_map=device_map,
+        ).eval()
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path, trust_remote_code=True, use_fast=False
+        )
+        print("模型加载成功！")
+
+    except Exception as e:
+        print(f"模型加载失败: {e}")
+        print("尝试不使用量化...")
+        try:
+            model = (
+                AutoModel.from_pretrained(
+                    model_path,
+                    torch_dtype=torch.bfloat16,
+                    low_cpu_mem_usage=True,
+                    use_flash_attn=False,
+                    trust_remote_code=True,
+                )
+                .eval()
+                .cuda()
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_path, trust_remote_code=True, use_fast=False
+            )
+            print("模型加载成功（无量化）！")
+        except Exception as e2:
+            print(f"模型加载完全失败: {e2}")
+            return
+
+    # 分析图像
+    image_path = r"foods\20240905_000550644_iOS.jpg"
+
+    # 根据你的显存情况调整max_tiles
+    # 4GB显存: max_tiles=1
+    # 8GB显存: max_tiles=4
+    # 16GB显存: max_tiles=9
+    max_tiles = 4  # 你可以根据显存情况调整
+
+    print(f"\n开始分析图像，最大块数限制: {max_tiles}")
+    result = analyze_food_image(image_path, model, tokenizer, max_tiles=max_tiles)
+
+    print("\n" + "=" * 50)
+    print("食物分析结果:")
+    print("=" * 50)
+    print(result)
+
+
+if __name__ == "__main__":
+
+    main()
