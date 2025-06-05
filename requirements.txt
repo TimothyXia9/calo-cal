@@ -7,3 +7,4 @@ protobuf
 requests
 accelerate
 einops
+timm
