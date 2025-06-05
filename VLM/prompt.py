@@ -1,25 +1,22 @@
 def create_food_prompt():
     """创建食物分析的结构化提示词"""
     prompt = """
-请分析这张图片中的食物，并以JSON格式输出结果。严格按照以下格式：
-
-{
-  "foods": [
+    Analyze food in this image. Output JSON format:
     {
-      "en_name": "食物英文名称",
-      "ch_name": "食物中文名称",
-      "estimated_weight_grams": 估算重量（数字）,
-      "confidence": 置信度(0-1),
-      "method": "raw/cooked/fried/steamed等"
+      "foods": [
+        {
+          "en_name": "food name",
+          "estimated_weight_grams": weight_number,
+          "confidence": 0.0-1.0,
+          "method": "raw/cooked/fried/steamed etc.",
+        }
+      ]
     }
-  ],
-}
 
-要求：
-1. 仔细观察每种食物的分量
-2. 重量估算要合理（参考标准餐具大小）
-3. 食物名称使用USDA数据库中常见的英文名称
-4. 如果不确定具体重量，给出合理范围的中值
-5. 不要给出过于相似的食物
+    Requirements:
+    - Estimate portions carefully
+    - Use USDA database food names
+    - Reasonable weight estimates
+    - Give median if uncertain
 """
     return prompt
