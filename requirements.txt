@@ -8,3 +8,6 @@ requests
 accelerate
 einops
 timm
+fastapi
+uvicorn
+python-multipart
