@@ -4,7 +4,6 @@ from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoModel, AutoTokenizer, AutoConfig
 import os
-from prompt import create_food_prompt
 import time
 
 
@@ -22,7 +21,19 @@ class InternVL3_model:
 
         self.device_map = "auto"
 
-        self.model, self.tokenizer = self.load_model()
+        self.model, self.tokenizer = None, None
+        self.load_model()
+
+    def mps_optimize(self, model):
+        if self.device == "mps":
+            try:
+                if hasattr(torch, "compile"):
+                    model = torch.compile(model, backend="aot_eager")
+                    print("模型编译成功")
+            except Exception as e:
+                print(f"模型编译失败: {e}")
+
+        return model
 
     def load_model(self):
         try:
@@ -64,7 +75,8 @@ class InternVL3_model:
             except Exception as e2:
                 print(f"模型加载完全失败: {e2}")
                 return
-            return model, tokenizer
+            self.model = self.mps_optimize(model).to(self.device)
+            self.tokenizer = tokenizer
 
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -161,6 +173,15 @@ def load_image(image_file, input_size=448, max_num=4):
     return pixel_values
 
 
+def get_food_prompt():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    prompt_file = os.path.join(script_dir, "prompts", "food_prompt.txt")
+    if os.path.exists(prompt_file):
+        with open(prompt_file, "r", encoding="utf-8") as f:
+            prompt = f.read().strip()
+            return prompt.replace("\n", " ").strip()
+
+
 def analyze_food_image(image_path, model, tokenizer, max_tiles=4, device="cpu"):
     """
     分析食物图片的主函数
@@ -180,12 +201,12 @@ def analyze_food_image(image_path, model, tokenizer, max_tiles=4, device="cpu"):
         # 生成配置
         generation_config = dict(
             max_new_tokens=512,
-            do_sample=False,  # 使用贪婪解码获得更一致的结果
-            temperature=0.7,
+            do_sample=True,
+            temperature=0.1,
         )
 
         # 构建问题
-        question = "<image>\n" + create_food_prompt()
+        question = "<image>\n" + get_food_prompt()
 
         # 进行推理
         print("正在分析图像...")
@@ -200,8 +221,8 @@ def analyze_food_image(image_path, model, tokenizer, max_tiles=4, device="cpu"):
 def main():
     start_time = time.time()
     # 分析图像
-    image_path = r"foods/20240911_231850124_iOS.jpg"
-    intern_model = InternVL3_model()
+    image_path = r"foods/20240903_163132850_IOS.jpg"
+    intern_model = InternVL3_model(model_path="OpenGVLab/InternVL3-2B")
     model, tokenizer = intern_model.model, intern_model.tokenizer
 
     # 根据你的显存情况调整max_tiles
