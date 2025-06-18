@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>食物卡路里分析器</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-utensils"></i> 食物卡路里分析器</h1>
+            <p>上传食物照片，AI智能识别并计算卡路里含量</p>
+        </header>
+
+        <main class="main-content">
+            <!-- 上传区域 -->
+            <section class="upload-section">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-content">
+                        <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                        <h3>拖拽图片到此处或点击上传</h3>
+                        <p>支持 JPG、PNG、WEBP 格式</p>
+                        <input type="file" id="fileInput" accept="image/*" multiple>
+                        <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                            <i class="fas fa-plus"></i> 选择图片
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 图片预览区域 -->
+            <section class="preview-section" id="previewSection" style="display: none;">
+                <h3><i class="fas fa-images"></i> 图片预览</h3>
+                <div class="image-preview" id="imagePreview"></div>
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="analyzeBtn">
+                        <i class="fas fa-brain"></i> 开始分析
+                    </button>
+                    <button class="btn btn-secondary" id="clearBtn">
+                        <i class="fas fa-trash"></i> 清除图片
+                    </button>
+                </div>
+            </section>
+
+            <!-- 分析进度 -->
+            <section class="analysis-section" id="analysisSection" style="display: none;">
+                <div class="progress-container">
+                    <h3><i class="fas fa-cog fa-spin"></i> 正在分析中...</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">准备分析图片...</p>
+                </div>
+            </section>
+
+            <!-- 分析结果 -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <h3><i class="fas fa-chart-pie"></i> 分析结果</h3>
+                <div class="results-container" id="resultsContainer">
+                    <!-- 结果将在这里动态生成 -->
+                </div>
+                <div class="result-actions">
+                    <button class="btn btn-success" id="saveBtn">
+                        <i class="fas fa-save"></i> 保存记录
+                    </button>
+                    <button class="btn btn-primary" id="newAnalysisBtn">
+                        <i class="fas fa-plus"></i> 新的分析
+                    </button>
+                </div>
+            </section>
+
+            <!-- 历史记录 -->
+            <section class="history-section">
+                <h3><i class="fas fa-history"></i> 历史记录</h3>
+                <div class="history-container" id="historyContainer">
+                    <p class="no-history">暂无历史记录</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- 错误提示模态框 -->
+    <div class="modal" id="errorModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4><i class="fas fa-exclamation-triangle"></i> 错误提示</h4>
+                <span class="close" onclick="closeModal('errorModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p id="errorMessage"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('errorModal')">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
