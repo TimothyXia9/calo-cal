@@ -11,3 +11,4 @@ timm
 fastapi
 uvicorn
 python-multipart
+aiohttp
